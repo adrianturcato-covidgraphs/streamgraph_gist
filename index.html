@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<head>
+  <title>Current COVID-19 Cases</title>
+</head>
+<style>
+
+body {
+  font: 10px sans-serif;
+}
+
+.chart { 
+  background: #fff;
+}
+
+p {
+  font: 12px helvetica;
+}
+
+.axis path, .axis line {
+  fill: none;
+  stroke: #000;
+  stroke-width: 1px;
+  shape-rendering: crispEdges;
+}
+
+#buttons {
+  position: absolute;
+  left: 50px;
+  top: 10px;
+}
+
+#toggle {
+  position: absolute;
+  left: 760px;
+  top: 10px;
+}
+
+</style>
+<body>
+<script src="https://d3js.org/d3.v2.js"></script>
+<script src="https://d3js.org/d3-color.v1.min.js"></script>
+<script src="https://d3js.org/d3-interpolate.v1.min.js"></script>
+<script src="https://d3js.org/d3-scale-chromatic.v1.min.js"></script>
+<script src="jsonData.js"></script>
+<script src="usaJsonData.js"></script>
+<div id="buttons">
+	<button onclick="toggleGlobal()">Global</button>
+	<button onclick="toggleUSA()">USA</button>
+</div>
+<button onclick="toggleScale()" id="toggle">Toggle Scale</button>
+<div class="chart">
+</div>
+
+<script>
+	var dataClass = "globalData";
+	var prevClass = "usaData";
+
+	var margin = {top: 20, right: 60, bottom: 50, left: 30};
+	var width = 800 - margin.left - margin.right;
+	var height = 500 - margin.top - margin.bottom;
+	
+	var svg = d3.select(".chart").append("svg")
+    	.attr("width", width + margin.left + margin.right)
+    	.attr("height", height + margin.top + margin.bottom)
+    	.append("g")
+    	.attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+	var format = d3.time.format("%m/%d/%y");
+  	function formatDate (d) {
+    	d.date = format.parse(d.date);
+    	d.value = +d.value;
+  	}
+
+	var usaData = getusaJsonData();
+	usaData.forEach(formatDate);
+	var usaLayers = prepareData(usaData);
+
+	var globalData = getjsonData();
+	globalData.forEach(formatDate);
+	var globalLayers = prepareData(globalData);
+
+	var data = globalData;
+	var layers = globalLayers; 
+
+	// axis
+	var x = d3.time.scale()
+		.range([0, width]);
+		
+  	var xAxis = d3.svg.axis()
+		.orient("bottom")
+		.ticks(d3.time.weeks);
+
+  	svg.append("g")
+		.attr("class", "x axis")
+		.attr("transform", "translate(0," + height + ")");		
+
+	var yAxis = d3.svg.axis()
+		.orient("right") 
+    	.tickFormat(d3.format(","));
+
+	svg.append("g")
+    	.attr("class", "y axis")
+    	.attr("transform", "translate(" + width + ", 0)");
+
+    // clipping paths
+  	svg.append("defs")
+	    .append("clipPath")
+	    .attr("id","clip")
+	    .append("rect")
+	    .attr("width",width-3)
+	    .attr("height",height-10)
+	    .attr("x",0)
+	    .attr("y",0);
+
+	svg.append("text")
+		.attr("text-anchor", "middle") 
+		.attr("transform", "translate("+ (width + margin.right*0.8) +","+(height/2)+")rotate(90)")  
+		.text("Current Outstanding Cases");
+
+  	svg.append("text")
+		.attr("text-anchor", "middle")  
+		.attr("transform", "translate("+ (width/2) +","+(height + margin.bottom*0.75)+")")  
+		.text("Date");
+
+  	var tooltip = d3.select("body")
+		.append("div")
+		.attr("class", "remove")
+		.style("position", "absolute")
+		.style("z-index", "20")
+		.style("visibility", "hidden")
+		.style("top", "30px")
+		.style("left", "55px");
+
+  	var area = d3.svg.area()
+      	.interpolate("cardinal")
+      	.x(d => x(d.date));
+
+     var blank = d3.svg.area()
+      	.interpolate("cardinal")
+      	.x(d => x(d.date));
+
+	var logScale = true;
+	drawScale();
+  	draw();
+
+    function toggleScale(){
+    	logScale = !logScale;
+    	drawScale();
+    }
+
+    function toggleUSA(){
+    	prevClass = dataClass;
+    	dataClass = "usaData";
+
+    	data = usaData;
+		layers = usaLayers;
+		drawScale();
+		draw();
+    }
+
+    function toggleGlobal(){
+    	prevClass = dataClass;
+    	dataClass = "globalData";
+
+		data = globalData;
+		layers = globalLayers;
+		drawScale(); 
+    	draw();
+    }
+
+    function drawScale(){
+	   	area.y0(d => {return y(d.y0 + 1)})
+      		.y1(d => {return y(d.y0 + d.y + 1)});
+      	blank.y0(d => height)
+      		.y1(d => height);
+
+    	var yExt = d3.extent(data, d => {return d.y0 + d.y});
+    	var logMin = 1000;
+    	if(dataClass == "usaData") logMin = 300;
+	    y = d3.scale.log()
+	        .range([height-10, 0])
+	        .domain([logMin,yExt[1]]);
+	    if(!logScale){
+	    	y = d3.scale.linear()
+		        .range([height-10, 0])
+		        .domain(yExt);
+	    }
+	    yAxis.scale(y);
+
+	    x.domain(d3.extent(data, d => d.date));
+	    xAxis.scale(x);
+
+	    svg.selectAll(".y")
+			.transition("axis")
+			.duration(1000)
+			.call(yAxis);
+
+	    svg.selectAll(".x")
+			.transition("axis")
+			.duration(1000)
+			.call(xAxis);
+
+	    svg.selectAll(".layer")
+	    	.transition("axis")
+			.duration(1000)
+			.attr("d", d => area(d.values))	
+    }
+
+	function draw(){
+		var leaving = svg.selectAll(`.${prevClass}`);
+	    leaving.transition("load")
+			.duration(1000)
+			.attr("d", d => blank(d.values))
+			.remove();	
+
+	    var countries = svg.selectAll(`.${dataClass}`)
+			.data(layers);
+
+	    countries.enter()
+	    	.append("path")
+	    	.attr("d", d => blank(d.values))
+	    	.on("mouseover", function(d, i) {
+      			// svg.selectAll(".layer")
+      			// 	.transition("tooltip")
+      			// 	.duration(250)
+      			// 	.attr("opacity", (d, j) => {return j != i ? 0.6 : 1;})
+      		})
+    		.on("mousemove", d => updateTooltip(d))
+    		.on("mouseout", function(d, i) {
+     			// svg.selectAll(".layer")
+      		// 		.transition("tooltip")
+      		// 		.duration(250)
+      		// 		.attr("opacity", "1");
+      			tooltip.style("visibility", "hidden");
+  			})
+	    	.transition("load")
+			.duration(1000)
+	    	.attr("d", d => blank(d.values))
+			.attr("class", `layer ${dataClass}`)
+			.attr("d", d => area(d.values))
+			.attr("fill", d => {return `url(#${d.gradient})`})
+			.attr("clip-path","url(#clip)")
+			.attr("opacity", 1);
+  	}
+
+	function prepareData(data){
+		//manipulate data
+		var nest = d3.nest()
+	    	.key(function(d) { return d.key; });
+		var alphabetic = nest.entries(data);
+		var l = alphabetic.length;
+
+  		//order data
+		for(var i = 0; i < l; i++){
+			var vals = alphabetic[i].values;
+			var lv = vals.length;
+			var current = vals[lv-1];
+			alphabetic[i].fatality = current.fatality;
+			alphabetic[i].current = current.value;
+			alphabetic[i].index = i
+		}
+		alphabetic.sort((a,b) => (a.current - b.current));
+
+    	var stack = d3.layout.stack()
+	      .offset("zero")
+	      .order(() => alphabetic.map(e => e.index))
+	      .values(d => d.values)
+	      .x(d => d.date)
+	      .y(d => d.value);
+
+		//add color gradients
+		for(var i = 0; i < l; i++){
+			var name = alphabetic[i].key.replace(/\s/g, '')
+			var id = `gradient-${name}`;
+			alphabetic[i].gradient = id;
+
+			var defs = svg.append("defs");
+
+			var gradient = defs.append("linearGradient")
+			   .attr("id", id)
+			   .attr("x1", "0%")
+			   .attr("x2", "100%")
+			   .attr("y1", "0%")
+			   .attr("y2", "0%");
+
+			var values = alphabetic[i].values;
+			var lv = alphabetic[i].values.length;
+
+			for(var j = 0; j < lv; j++){
+				var offset = `${Math.round(j*100/(lv-1))}%`;
+				var fr = values[j].fatality/0.08;
+				var col = d3.interpolateRdYlGn(1-fr);
+
+		  		gradient.append("stop")
+					.attr("offset", offset)
+					.attr("stop-color", col)
+					.attr("stop-opacity", 1);  
+			}
+		}
+
+		var layers = stack(nest.entries(data));
+	    for(var i = 0; i < l; i++){
+			var name = layers[i].key.replace(/\s/g, '')
+			var id = `gradient-${name}`;
+			layers[i].gradient = id;
+	    }
+    	return layers;
+	}
+
+	function updateTooltip(d){
+		current = d3.format(",")(d.values[d.values.length-1].value)
+		deaths = d3.format(",")(d.values[d.values.length-1].deaths)
+		recoveries = d3.format(",")(d.values[d.values.length-1].recovered)
+		fatality = d3.format(".1%")(d.values[d.values.length-1].fatality)
+
+		n = d.key;
+		if(n == "Korea, South") n = "South Korea";
+		if(n == "Taiwan*") n = "Taiwan";
+
+		tooltip.html( `<p> ${n} <br> current cases: ${current} <br> deaths: ${deaths} <br> recoveries: ${recoveries} <br> CFR: ${fatality} </p>` ).style("visibility", "visible");
+	}
+</script>
